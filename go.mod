@@ -1,1 +1,3 @@
-go 1.21
+module stock-tracker
+
+go 1.25.1
