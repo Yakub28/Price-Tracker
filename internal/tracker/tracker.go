@@ -2,10 +2,11 @@ package tracker
 
 import (
 	"fmt"
-	"log"
 	"stock-tracker/internal/alerts"
 	"stock-tracker/internal/api"
+	"stock-tracker/internal/metrics"
 	"stock-tracker/internal/models"
+	"stock-tracker/pkg/logger"
 	"sync"
 	"time"
 )
@@ -15,14 +16,16 @@ type StockTracker struct {
 	mu       sync.RWMutex
 	client   *api.AlphaVantageClient
 	monitor  *alerts.AlertMonitor
+	metrics  *metrics.Metrics
 	interval time.Duration
 }
 
-func New(apiKey string, interval time.Duration, alertThreshold float64) *StockTracker {
+func New(apiKey string, interval time.Duration, alertThreshold float64, m *metrics.Metrics) *StockTracker {
 	return &StockTracker{
 		stocks:   make(map[string]*models.Stock),
-		client:   api.NewClient(apiKey),
-		monitor:  alerts.NewMonitor(alertThreshold),
+		client:   api.NewClient(apiKey, m),
+		monitor:  alerts.NewMonitor(alertThreshold, m),
+		metrics:  m,
 		interval: interval,
 	}
 }
@@ -33,30 +36,71 @@ func (st *StockTracker) AddStock(symbol string) {
 
 	if _, exists := st.stocks[symbol]; !exists {
 		st.stocks[symbol] = models.NewStock(symbol)
-		log.Printf("Added %s to tracking list", symbol)
+
+		st.metrics.TrackedStocksCount.Inc()
+
+		logger.Info().
+			Str("symbol", symbol).
+			Msg("Added stock to tracking list")
 	}
 }
 
 func (st *StockTracker) RemoveStock(symbol string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	if _, exists := st.stocks[symbol]; exists {
+		delete(st.stocks, symbol)
+		st.metrics.TrackedStocksCount.Dec()
 
-	delete(st.stocks, symbol)
-	log.Printf("Removed %s from tracking list", symbol)
+		logger.Info().
+			Str("symbol", symbol).
+			Msg("Removed stock from tracking list")
+	}
 }
 
 func (st *StockTracker) UpdateStock(symbol string) error {
+	start := time.Now()
+
+	logger.Debug().
+		Str("symbol", symbol).
+		Msg("Starting stock update")
+
 	newData, err := st.client.GetQuote(symbol)
+	duration := time.Since(start).Seconds()
+
+	st.metrics.StockUpdateDuration.WithLabelValues(symbol).Observe(duration)
+
 	if err != nil {
+		st.metrics.StockUpdatesTotal.WithLabelValues(symbol, "error").Inc()
+
+		logger.Error().
+			Err(err).
+			Str("symbol", symbol).
+			Float64("duration_seconds", duration).
+			Msg("Failed to update stock")
+
 		return fmt.Errorf("failed to update %s: %w", symbol, err)
 	}
 
 	st.mu.Lock()
 	if stock, exists := st.stocks[symbol]; exists {
 		stock.UpdatePrice(newData.CurrentPrice, newData.ChangePercent)
+
+		// Update Prometheus gauges
+		st.metrics.CurrentStockPrice.WithLabelValues(symbol).Set(stock.CurrentPrice)
+		st.metrics.StockPriceChange.WithLabelValues(symbol).Set(stock.ChangePercent)
+
 		st.mu.Unlock()
 
 		st.monitor.CheckStock(stock)
+		st.metrics.StockUpdatesTotal.WithLabelValues(symbol, "success").Inc()
+
+		logger.Info().
+			Str("symbol", symbol).
+			Float64("price", stock.CurrentPrice).
+			Float64("change_percent", stock.ChangePercent).
+			Float64("duration_seconds", duration).
+			Msg("Successfully updated stock")
 	} else {
 		st.mu.Unlock()
 	}
@@ -65,6 +109,8 @@ func (st *StockTracker) UpdateStock(symbol string) error {
 }
 
 func (st *StockTracker) UpdateAll() {
+	logger.Info().Msg("Starting update cycle for all stocks")
+
 	st.mu.RLock()
 	symbols := make([]string, 0, len(st.stocks))
 	for symbol := range st.stocks {
@@ -72,13 +118,27 @@ func (st *StockTracker) UpdateAll() {
 	}
 	st.mu.RUnlock()
 
+	successCount := 0
 	for _, symbol := range symbols {
 		if err := st.UpdateStock(symbol); err != nil {
-			log.Printf("Error updating %s: %v", symbol, err)
+			logger.Error().
+				Err(err).
+				Str("symbol", symbol).
+				Msg("Error updating stock in batch")
+		} else {
+			successCount++
 		}
 		// Rate limiting: 5 calls per minute for free tier
 		time.Sleep(12 * time.Second)
 	}
+
+	st.metrics.UpdateCyclesTotal.Inc()
+
+	logger.Info().
+		Int("total", len(symbols)).
+		Int("success", successCount).
+		Int("failed", len(symbols)-successCount).
+		Msg("Completed update cycle")
 }
 
 func (st *StockTracker) Display() {
@@ -105,7 +165,7 @@ func (st *StockTracker) Display() {
 			stock.LastUpdated.Format("15:04:05"),
 		)
 	}
-	fmt.Println("===========================================\n")
+	fmt.Println("===========================================")
 }
 
 func (st *StockTracker) Run() {
@@ -115,17 +175,17 @@ func (st *StockTracker) Run() {
 	defer ticker.Stop()
 
 	// Initial update
-	log.Println("Performing initial stock update...")
+	logger.Info().Msg("Performing initial stock update")
 	st.UpdateAll()
 	st.Display()
 
 	for range ticker.C {
-		log.Println("Updating stock prices...")
 		st.UpdateAll()
 		st.Display()
 	}
 }
 
 func (st *StockTracker) Close() {
+	logger.Info().Msg("Closing stock tracker")
 	st.monitor.Close()
 }

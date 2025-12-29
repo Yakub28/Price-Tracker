@@ -2,26 +2,31 @@ package alerts
 
 import (
 	"fmt"
-	"log"
+	"stock-tracker/internal/metrics"
 	"stock-tracker/internal/models"
+	"stock-tracker/pkg/logger"
 )
 
 type AlertMonitor struct {
 	threshold float64
 	alertChan chan string
+	metrics   *metrics.Metrics
 }
 
-func NewMonitor(threshold float64) *AlertMonitor {
+func NewMonitor(threshold float64, m *metrics.Metrics) *AlertMonitor {
 	return &AlertMonitor{
 		threshold: threshold,
 		alertChan: make(chan string, 100),
+		metrics:   m,
 	}
 }
 
 func (m *AlertMonitor) Start() {
 	go func() {
 		for alert := range m.alertChan {
-			log.Printf("🚨 ALERT: %s\n", alert)
+			logger.Warn().
+				Str("alert", alert).
+				Msg("Stock price alert triggered")
 		}
 	}()
 }
@@ -36,10 +41,11 @@ func (m *AlertMonitor) CheckStock(stock *models.Stock) {
 		alert := fmt.Sprintf("%s changed by %.2f%% (from $%.2f to $%.2f)",
 			stock.Symbol, pctChange, stock.PreviousPrice, stock.CurrentPrice)
 
+		m.metrics.AlertsTriggered.WithLabelValues(stock.Symbol, alert).Inc()
 		select {
 		case m.alertChan <- alert:
 		default:
-			log.Println("Alert channel full, dropping alert")
+			logger.Warn().Msg("Alert channel full, dropping alert")
 		}
 	}
 }

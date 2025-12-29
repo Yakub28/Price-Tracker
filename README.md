@@ -34,6 +34,29 @@ stock-tracker/
 └── README.md
 ```
 
+### Prometheus Metrics
+
+**API Metrics:**
+- `stock_tracker_api_calls_total` - Total API calls (by provider, symbol, status)
+- `stock_tracker_api_call_duration_seconds` - API call latency histogram
+- `stock_tracker_api_errors_total` - API errors (by type)
+
+**Stock Update Metrics:**
+- `stock_tracker_update_duration_seconds` - Update operation duration
+- `stock_tracker_updates_total` - Total updates (by status)
+- `stock_tracker_current_price` - Current stock prices (gauge)
+- `stock_tracker_price_change_percent` - Price change percentage (gauge)
+
+**Alert Metrics:**
+- `stock_tracker_alerts_triggered_total` - Total alerts fired
+
+**System Metrics:**
+- `stock_tracker_tracked_stocks_count` - Number of tracked stocks
+- `stock_tracker_update_cycles_total` - Completed update cycles
+
+View metrics:
+
+bashcurl http://localhost:9090/metrics
 ## Setup
 
 1. Get a free API key from Alpha Vantage:

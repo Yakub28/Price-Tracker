@@ -1,27 +1,60 @@
 package main
 
 import (
-	"log"
+	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
+	"stock-tracker/internal/metrics"
 	"stock-tracker/internal/tracker"
 	"stock-tracker/pkg/config"
+	"stock-tracker/pkg/logger"
 	"syscall"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		fmt.Printf("Failed to load configuration: %v\n", err)
+		os.Exit(1)
 	}
 
-	log.Println("Starting Stock Price Tracker...")
-	log.Printf("Update interval: %v", cfg.UpdateInterval)
-	log.Printf("Alert threshold: %.2f%%", cfg.AlertThreshold)
+	// Initialize structured logging
+	logger.Init(cfg.Debug)
 
-	stockTracker := tracker.New(cfg.APIKey, cfg.UpdateInterval, cfg.AlertThreshold)
+	logger.Info().
+		Bool("debug", cfg.Debug).
+		Str("version", "1.0.0").
+		Msg("Starting Stock Price Tracker")
+
+	// Initialize metrics
+	m := metrics.New()
+
+	// Start Prometheus metrics server
+	metricsAddr := fmt.Sprintf(":%d", cfg.MetricsPort)
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+
+		logger.Info().
+			Str("address", metricsAddr).
+			Msg("Starting Prometheus metrics server")
+
+		if err := http.ListenAndServe(metricsAddr, nil); err != nil {
+			logger.Fatal().
+				Err(err).
+				Msg("Failed to start metrics server")
+		}
+	}()
+
+	logger.Info().
+		Dur("update_interval", cfg.UpdateInterval).
+		Float64("alert_threshold", cfg.AlertThreshold).
+		Int("metrics_port", cfg.MetricsPort).
+		Msg("Configuration loaded")
+
+	stockTracker := tracker.New(cfg.APIKey, cfg.UpdateInterval, cfg.AlertThreshold, m)
 	defer stockTracker.Close()
 
 	for _, symbol := range cfg.DefaultSymbols {
@@ -33,12 +66,20 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		<-sigChan
-		log.Println("\nShutting down gracefully...")
+		sig := <-sigChan
+		logger.Info().
+			Str("signal", sig.String()).
+			Msg("Received shutdown signal")
+
 		stockTracker.Close()
+		logger.Info().Msg("Graceful shutdown complete")
 		os.Exit(0)
 	}()
 
-	log.Println("Press Ctrl+C to stop")
+	logger.Info().Msg("Stock tracker running. Press Ctrl+C to stop")
+	logger.Info().
+		Str("metrics_url", fmt.Sprintf("http://localhost%s/metrics", metricsAddr)).
+		Msg("Prometheus metrics available")
+
 	stockTracker.Run()
 }
