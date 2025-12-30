@@ -6,25 +6,18 @@ import (
 )
 
 type Metrics struct {
-	// API call metrics
-	APICallsTotal   *prometheus.CounterVec
-	APICallDuration *prometheus.HistogramVec
-	APICallErrors   *prometheus.CounterVec
-
-	// Stock update metrics
+	APICallsTotal       *prometheus.CounterVec
+	APICallDuration     *prometheus.HistogramVec
+	APICallErrors       *prometheus.CounterVec
 	StockUpdateDuration *prometheus.HistogramVec
 	StockUpdatesTotal   *prometheus.CounterVec
-
-	// Current stock prices (gauges)
-	CurrentStockPrice *prometheus.GaugeVec
-	StockPriceChange  *prometheus.GaugeVec
-
-	// Alert metrics
-	AlertsTriggered *prometheus.CounterVec
-
-	// System metrics
-	TrackedStocksCount prometheus.Gauge
-	UpdateCyclesTotal  prometheus.Counter
+	CurrentStockPrice   *prometheus.GaugeVec
+	StockPriceChange    *prometheus.GaugeVec
+	AlertsTriggered     *prometheus.CounterVec
+	TrackedStocksCount  prometheus.Gauge
+	UpdateCyclesTotal   prometheus.Counter
+	WebSocketClients    prometheus.Gauge
+	HTTPRequestsTotal   *prometheus.CounterVec
 }
 
 func New() *Metrics {
@@ -36,7 +29,6 @@ func New() *Metrics {
 			},
 			[]string{"provider", "symbol", "status"},
 		),
-
 		APICallDuration: promauto.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "stock_tracker_api_call_duration_seconds",
@@ -45,7 +37,6 @@ func New() *Metrics {
 			},
 			[]string{"provider", "symbol"},
 		),
-
 		APICallErrors: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "stock_tracker_api_errors_total",
@@ -53,7 +44,6 @@ func New() *Metrics {
 			},
 			[]string{"provider", "symbol", "error_type"},
 		),
-
 		StockUpdateDuration: promauto.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "stock_tracker_update_duration_seconds",
@@ -62,7 +52,6 @@ func New() *Metrics {
 			},
 			[]string{"symbol"},
 		),
-
 		StockUpdatesTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "stock_tracker_updates_total",
@@ -70,7 +59,6 @@ func New() *Metrics {
 			},
 			[]string{"symbol", "status"},
 		),
-
 		CurrentStockPrice: promauto.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "stock_tracker_current_price",
@@ -78,7 +66,6 @@ func New() *Metrics {
 			},
 			[]string{"symbol"},
 		),
-
 		StockPriceChange: promauto.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "stock_tracker_price_change_percent",
@@ -86,7 +73,6 @@ func New() *Metrics {
 			},
 			[]string{"symbol"},
 		),
-
 		AlertsTriggered: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "stock_tracker_alerts_triggered_total",
@@ -94,19 +80,30 @@ func New() *Metrics {
 			},
 			[]string{"symbol", "alert_type"},
 		),
-
 		TrackedStocksCount: promauto.NewGauge(
 			prometheus.GaugeOpts{
 				Name: "stock_tracker_tracked_stocks_count",
 				Help: "Number of stocks being tracked",
 			},
 		),
-
 		UpdateCyclesTotal: promauto.NewCounter(
 			prometheus.CounterOpts{
 				Name: "stock_tracker_update_cycles_total",
 				Help: "Total number of update cycles completed",
 			},
+		),
+		WebSocketClients: promauto.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "stock_tracker_websocket_clients",
+				Help: "Number of connected WebSocket clients",
+			},
+		),
+		HTTPRequestsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "stock_tracker_http_requests_total",
+				Help: "Total number of HTTP requests",
+			},
+			[]string{"method", "endpoint", "status"},
 		),
 	}
 }
